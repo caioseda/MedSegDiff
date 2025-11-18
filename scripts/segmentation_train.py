@@ -14,6 +14,13 @@ from guided_diffusion.script_util import (
     args_to_dict,
     add_dict_to_argparser,
 )
+
+from vfss_data_split.datasets.vfss_dataset import VFSSImageDataset
+from vfss_data_split.datasets.collate import vfss_collate_fn
+import vfss_data_split.data_extraction.video_frame as video_frame
+from pathlib import Path
+
+
 import torch as th
 from pathlib import Path
 from guided_diffusion.train_util import TrainLoop
@@ -41,6 +48,40 @@ def main():
 
         ds = BRATSDataset3D(args.data_dir, transform_train, test_flag=False)
         args.in_ch = 5
+    
+    elif args.data_name == 'VFSS':
+        tran_list = [transforms.Resize((args.image_size,args.image_size)),]
+        transform_train = transforms.Compose(tran_list)
+        args.in_ch = 4
+
+        # If img path must be 
+        img_path = Path(args.data_dir) / 'dataset_inca'
+        metadata_csv_path = Path(args.data_dir) / 'metadados/' #video_frame_metadata_test.csv
+
+        video_frame_split = {}
+        dataset_split = {}
+        for split_name in ['train', 'val', 'test']:
+            split_path = metadata_csv_path / f'video_frame_metadata_{split_name}.csv'
+            
+            print(f"Checking for metadata CSV at: {split_path}")
+            if not split_path.exists():
+                print(f"Metadata CSV for {split_name} split does not exist at {split_path}. Skipping.")
+                continue
+
+            video_frame_split[split_name] = video_frame.load_video_frame_metadata_from_csv(split_path)
+            
+            dataset = VFSSImageDataset(
+                video_frame_df=video_frame_split[split_name],
+                target='mask',
+                from_images=True,
+                transform=transform_train,
+                return_single_target=True,
+            )
+            dataset_split[split_name] = dataset
+            print(f"{split_name} dataset length: {len(dataset)}")
+
+        ds = dataset_split['train']
+
     elif any(Path(args.data_dir).glob("*\*.nii.gz")):
         tran_list = [transforms.Resize((args.image_size,args.image_size)),]
         transform_train = transforms.Compose(tran_list)
@@ -54,10 +95,12 @@ def main():
         ds = CustomDataset(args, args.data_dir, transform_train)
         args.in_ch = 4
         
+    
     datal= th.utils.data.DataLoader(
         ds,
         batch_size=args.batch_size,
-        shuffle=True)
+        shuffle=True
+    )
     data = iter(datal)
 
     logger.log("creating model and diffusion...")
