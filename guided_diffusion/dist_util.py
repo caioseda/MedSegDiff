@@ -1,7 +1,6 @@
 """
 Helpers for distributed training.
 """
-
 import io
 import os
 import socket
@@ -15,7 +14,7 @@ import torch.distributed as dist
 # The GPU for a given rank is (rank % GPUS_PER_NODE).
 GPUS_PER_NODE = 8
 
-SETUP_RETRY_COUNT = 3
+SETUP_RETRY_COUNT = 1
 
 
 def setup_dist(args):
@@ -24,8 +23,8 @@ def setup_dist(args):
     """
     if dist.is_initialized():
         return
-    if not args.multi_gpu:
-        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_dev
+    # if not args.multi_gpu:
+    #     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_dev
 
     backend = "gloo" if not th.cuda.is_available() else "nccl"
 
@@ -33,17 +32,18 @@ def setup_dist(args):
         hostname = "localhost"
     else:
         hostname = socket.gethostbyname(socket.getfqdn())
-    os.environ["MASTER_ADDR"] = '127.0.1.1'#comm.bcast(hostname, root=0)
+    os.environ["MASTER_ADDR"] = 'localhost'#comm.bcast(hostname, root=0)
     os.environ["RANK"] = '0'#str(comm.rank)
     os.environ["WORLD_SIZE"] = '1'#str(comm.size)
 
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(("", 0))
-    s.listen(1)
-    port = s.getsockname()[1]
-    s.close()
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+    
     os.environ["MASTER_PORT"] = str(port)
     dist.init_process_group(backend=backend, init_method="env://")
+    print('''Initialized distributed process group: {} using backend: {}'''.format(dist.get_rank(), backend))
 
 
 def dev():
