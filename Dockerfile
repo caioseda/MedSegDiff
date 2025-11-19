@@ -12,10 +12,11 @@ WORKDIR /workspace
 ARG GITHUB_TOKEN
 
 # Clona vfss-data-split
-RUN git clone \
-    -b CS/medsegdiff \
-    https://${GITHUB_TOKEN}:x-oauth-basic@github.com/puc-rio-inca/vfss-data-split.git \
-    vfss-data-split
+COPY vfss-data-split /workspace/vfss-data-split/
+# RUN git clone \
+#     -b CS/medsegdiff \
+#     https://${GITHUB_TOKEN}:x-oauth-basic@github.com/puc-rio-inca/vfss-data-split.git \
+#     vfss-data-split
 
 # Instala biblioteca
 WORKDIR /workspace/vfss-data-split
