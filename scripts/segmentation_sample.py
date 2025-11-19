@@ -59,6 +59,23 @@ def main():
 
         ds = BRATSDataset3D(args.data_dir,transform_test)
         args.in_ch = 5
+    
+    elif args.data_name == 'VFSS':
+        tran_list = [transforms.Resize((args.image_size,args.image_size)),]
+        transform_train = transforms.Compose(tran_list)
+        
+        split_path = Path(args.data_dir) / f'metadados/video_frame_metadata_train.csv'
+        video_frame_df = video_frame.load_video_frame_metadata_from_csv(split_path)
+            
+        ds = VFSSImageDataset(
+            video_frame_df=video_frame_df,
+            target='mask',
+            from_images=True,
+            transform=transform_train,
+            return_single_target=True,
+        )
+        args.in_ch = 4
+    
     else:
         tran_list = [transforms.Resize((args.image_size,args.image_size)), transforms.ToTensor()]
         transform_test = transforms.Compose(tran_list)

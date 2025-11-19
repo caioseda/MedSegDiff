@@ -52,35 +52,18 @@ def main():
     elif args.data_name == 'VFSS':
         tran_list = [transforms.Resize((args.image_size,args.image_size)),]
         transform_train = transforms.Compose(tran_list)
+        
+        split_path = Path(args.data_dir) / f'metadados/video_frame_metadata_train.csv'
+        video_frame_df = video_frame.load_video_frame_metadata_from_csv(split_path)
+            
+        ds = VFSSImageDataset(
+            video_frame_df=video_frame_df,
+            target='mask',
+            from_images=True,
+            transform=transform_train,
+            return_single_target=True,
+        )
         args.in_ch = 4
-
-        # If img path must be 
-        img_path = Path(args.data_dir) / 'dataset_inca'
-        metadata_csv_path = Path(args.data_dir) / 'metadados/' #video_frame_metadata_test.csv
-
-        video_frame_split = {}
-        dataset_split = {}
-        for split_name in ['train', 'val', 'test']:
-            split_path = metadata_csv_path / f'video_frame_metadata_{split_name}.csv'
-            
-            print(f"Checking for metadata CSV at: {split_path}")
-            if not split_path.exists():
-                print(f"Metadata CSV for {split_name} split does not exist at {split_path}. Skipping.")
-                continue
-
-            video_frame_split[split_name] = video_frame.load_video_frame_metadata_from_csv(split_path)
-            
-            dataset = VFSSImageDataset(
-                video_frame_df=video_frame_split[split_name],
-                target='mask',
-                from_images=True,
-                transform=transform_train,
-                return_single_target=True,
-            )
-            dataset_split[split_name] = dataset
-            print(f"{split_name} dataset length: {len(dataset)}")
-
-        ds = dataset_split['train']
 
     elif any(Path(args.data_dir).glob("*\*.nii.gz")):
         tran_list = [transforms.Resize((args.image_size,args.image_size)),]

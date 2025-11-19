@@ -1,11 +1,12 @@
-
 #!/bin/bash
 IMAGE="medsegdiff-vfss:latest"
 
-docker run \
-  --gpus all \
-  -v /home/caioseda/projetos/vfss-data-split/data:/workspace/vfss-data-split/data \
-  -v /home/caioseda/projetos/MedSegDiff/data/vfss/out:/workspace/medsegdiff/data/vfss/out \
+docker run -d \
+  -it \
+  -v /Users/caioseda/Documents/Trabalho/Tecgraf/projetos/vfss-data-split/data:/workspace/vfss-data-split/data \
+  -v /Users/caioseda/Documents/Trabalho/Tecgraf/projetos/MedSegDiff/data/vfss/out:/workspace/medsegdiff/data/vfss/out \
+  --name medsegdiff_train \
+  -u $(id -u):$(id -g) \
   $IMAGE \
   python scripts/segmentation_train.py \
     --data_name VFSS \
@@ -24,4 +25,4 @@ docker run \
     --rescale_learned_sigmas False \
     --rescale_timesteps False \
     --lr 1e-4 \
-    --batch_size 8
+    --batch_size 2
