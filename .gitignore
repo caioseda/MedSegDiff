@@ -1,4 +1,11 @@
-data/
+/data/
+/results/
+/runs/
+*.log
+*.csv
+!data/isic_csv/**
+
+
 **/__pycache__/
 *.pyc
 
