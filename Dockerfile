@@ -24,7 +24,7 @@ RUN pip install --upgrade pip && pip install .
 
 # Clona seu fork do MedSegDiff
 WORKDIR /workspace
-RUN git clone https://github.com/caioseda/MedSegDiff.git medsegdiff
+COPY ./ /workspace/medsegdiff/
 
 # Instala dependências do MedSegDiff
 WORKDIR /workspace/medsegdiff

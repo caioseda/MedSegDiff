@@ -1,9 +1,5 @@
-
-
 import argparse
 import os
-from ssl import OP_NO_TLSv1
-import nibabel as nib
 # from visdom import Visdom
 # viz = Visdom(port=8850)
 import sys
@@ -29,6 +25,12 @@ from guided_diffusion.script_util import (
 )
 import torchvision.transforms as transforms
 from torchsummary import summary
+from vfss_data_split.datasets.vfss_dataset import VFSSImageDataset
+from vfss_data_split.datasets.collate import vfss_collate_fn
+import vfss_data_split.data_extraction.video_frame as video_frame
+from pathlib import Path
+
+
 seed=10
 th.manual_seed(seed)
 th.cuda.manual_seed_all(seed)
@@ -63,8 +65,18 @@ def main():
     elif args.data_name == 'VFSS':
         tran_list = [transforms.Resize((args.image_size,args.image_size)),]
         transform_train = transforms.Compose(tran_list)
-        
-        split_path = Path(args.data_dir) / f'metadados/video_frame_metadata_train.csv'
+        vfss_split_map = {
+            'train': 'video_frame_metadata_train.csv',
+            'val': 'video_frame_metadata_val.csv',
+            'test': 'video_frame_metadata_test.csv',
+            'all': 'video_frame_metadata.csv',
+        }
+        vfss_split = args.vfss_split.lower()
+        split_filename = vfss_split_map.get(vfss_split)
+        if split_filename is None:
+            raise ValueError(f"Unknown VFSS split '{args.vfss_split}'. Expected one of {list(vfss_split_map.keys())}.")
+
+        split_path = Path(args.data_dir) / f'metadados/{split_filename}'
         video_frame_df = video_frame.load_video_frame_metadata_from_csv(split_path)
             
         ds = VFSSImageDataset(
@@ -123,6 +135,10 @@ def main():
         elif args.data_name == 'BRATS':
             # slice_ID=path[0].split("_")[2] + "_" + path[0].split("_")[4]
             slice_ID=path[0].split("_")[-3] + "_" + path[0].split("slice")[-1].split('.nii')[0]
+        elif args.data_name == 'VFSS':
+            frame_id = str(path['frame_id'].item())
+            video_id = str(path['video_id'].item())
+            slice_ID = f"v{video_id}_f{frame_id}"
 
         logger.log("sampling...")
 
@@ -203,7 +219,8 @@ def create_argparser():
         gpu_dev = "0",
         out_dir='./results/',
         multi_gpu = None, #"0,1,2"
-        debug = False
+        debug = False,
+        vfss_split = 'test',
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

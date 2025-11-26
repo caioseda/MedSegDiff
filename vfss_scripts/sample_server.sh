@@ -5,14 +5,17 @@ IMAGE="medsegdiff-vfss:latest"
 docker run -d\
   --gpus all \
   -v /home/caioseda/projetos/vfss-data-split/data:/workspace/vfss-data-split/data \
-  -v /home/caioseda/projetos/MedSegDiff/data/vfss/out:/workspace/medsegdiff/data/vfss/out \
-  --name medsegdiff_train \
+  -v /home/caioseda/projetos/MedSegDiff/data/out_sample_again:/workspace/medsegdiff/data/out_sample \
+  --name medsegdiff_sample \
   -u $(id -u):$(id -g) \
   $IMAGE \
-  python scripts/segmentation_train.py \
+  python scripts/segmentation_sample.py \
     --data_name VFSS \
     --data_dir /workspace/vfss-data-split/data \
-    --out_dir data/vfss/out \
+    --out_dir data/out_sample \
+    --dpm_solver True \
+    --diffusion_steps 100 \
+    --model_path data/runs/out/savedmodel100000.pt \
     --image_size 256 \
     --num_channels 128 \
     --class_cond False \
@@ -21,9 +24,7 @@ docker run -d\
     --learn_sigma True \
     --use_scale_shift_norm False \
     --attention_resolutions 16 \
-    --diffusion_steps 1000 \
     --noise_schedule linear \
     --rescale_learned_sigmas False \
     --rescale_timesteps False \
-    --lr 1e-4 \
-    --batch_size 8
+    --num_ensemble 5
