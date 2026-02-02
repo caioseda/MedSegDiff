@@ -13,7 +13,31 @@ import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
 from matplotlib import patches as mpatches
 
-def resolve_preds_dir(solver: str, preds_dir_arg: str):
+def _load_image_rgb(path: str, size: Optional[Tuple[int, int]] = None, resample_method=Image.BILINEAR) -> np.ndarray:
+    """Load an RGB image (png/jpg) as ndarray. Optionally resize to (W, H)."""
+    image = Image.open(path).convert("RGB")
+
+    if size is not None:
+        image = image.resize(size, resample=resample_method)
+
+    return np.asarray(image)
+
+def _load_mask_binary(path: str, size: Optional[Tuple[int, int]] = None, resample_method=Image.NEAREST, binarize: bool=True) -> np.ndarray:
+    """Load a mask (png/jpg) as binary ndarray in {0,1}. Optionally resize to (W, H)."""
+    mask_img = Image.open(path).convert("L")
+    
+    if size is not None:
+        mask_img = mask_img.resize(size, resample=Image.NEAREST)
+    
+    # Threshold to binary
+    mask_arr = np.asarray(mask_img)
+    mask_arr = (mask_arr / 255.0)
+    if binarize:
+        mask_arr = (mask_arr >= 0.5).astype(np.uint8)
+
+    return mask_arr
+
+def _resolve_preds_dir(solver: str, preds_dir_arg: str):
     """Resolve prediction directory, handling nested run folders."""
     default_pred_map = {
         "dpm": "/Users/caioseda/Documents/Trabalho/Tecgraf/projetos/MedSegDiff/data/out_sample_fast",
@@ -29,211 +53,318 @@ def resolve_preds_dir(solver: str, preds_dir_arg: str):
                 return sub
     return base
 
-def get_img_filename_from_videoframe_id(video_frame_id: str) -> str:
-    return video_frame_id + '.png'
-
-def get_gt_mask_filename_from_videoframe_id(video_frame_id: str) -> str:
-    return video_frame_id + '.tif'
-
-def get_pred_mask_filename_from_videoframe_id(video_frame_id: str) -> str:
-    return video_frame_id + '_output_ens.jpg'
-
-def get_img_gt_and_pred_paths_from_video_frame_id(
-    video_frame_id: str,
-    img_dir: str,
-    gt_mask_dir: str,
-    pred_mask_dir: str,
-):
-    img_filename = get_img_filename_from_videoframe_id(video_frame_id)
-    img_path = img_dir / img_filename
-
-    gt_filename = get_gt_mask_filename_from_videoframe_id(video_frame_id)
-    gt_mask_path = gt_mask_dir / gt_filename
+class VFSSImageVisualizer:
+    def __init__(self, img_dir: str, gt_mask_dir: str, pred_mask_dir: str, size: Optional[Tuple[int, int]] = (256, 256)):
+        self.img_dir = Path(img_dir)
+        self.gt_mask_dir = Path(gt_mask_dir)
+        self.pred_mask_dir = Path(pred_mask_dir)
+        self.size = size
     
-    pred_filename = get_pred_mask_filename_from_videoframe_id(video_frame_id)
-    pred_mask_path = pred_mask_dir/ pred_filename
+    def get_paths_from_video_frame_id(self, video_frame_id: str):
+        img_filename = video_frame_id + '.png'
+        img_path = self.img_dir / img_filename
 
-    return img_path, gt_mask_path, pred_mask_path
+        gt_filename = video_frame_id + '.tif'
+        gt_mask_path = self.gt_mask_dir / gt_filename
+        
+        pred_filename = video_frame_id + '_output_ens.jpg'
+        pred_mask_path = self.pred_mask_dir/ pred_filename
 
-def extract_numeric_id(filename: str) -> Optional[str]:
-    """Extract the contiguous digits id from filenames like 'ISIC_0011392.jpg'."""
-    name = os.path.splitext(os.path.basename(filename))[0]
-    match = re.search(r"(v\d+_f\d+)", name)
-    return match.group(1) if match else None
+        return img_path, gt_mask_path, pred_mask_path
 
+    def draw_mask_contour(
+        self,
+        mask: np.ndarray,
+        color: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+        title: str = "",
+        linewidth: float = 1,
+        fill: bool = False,
+        alpha: float = 0.4,
+    ) -> None:
+        """Draw mask contours."""
+        
+        ax = plt.gca()
+        ax.contour(
+            mask.astype(np.float32),
+            levels=[0.5],
+            colors=[color],
+            linewidths=linewidth,
+            fill=fill,
+            alpha=alpha,
+        )
+        # ax.title(title)
+        # ax.axis("off")
 
-def load_image_rgb(path: str) -> np.ndarray:
-    image = Image.open(path).convert("RGB")
-    return np.asarray(image)
+    def draw_gt_and_pred_mask_overlay(
+            self,
+            gt_mask: np.array, 
+            pred_mask: np.array, 
+            base_img: np.array = None,
+            gt_color: Tuple[float, float, float] = mcolors.to_rgb("#2AA198"), 
+            pred_color: Tuple[float, float, float] = mcolors.to_rgb("#FF8C00"), 
+            linewidth: float = 1, 
+            alpha: float = 0.4
+        ) -> None:
+        """Draw mask ground truth and prediction contours."""
 
+        # Plot base image
+        if base_img is not None:
+            plt.imshow(base_img)
+            plt.gca().invert_yaxis()  # Ensure the y-axis matches the image orientation
 
-def load_mask_binary(path: str, size: Optional[Tuple[int, int]] = None) -> np.ndarray:
-    """Load a mask (png/jpg) as binary ndarray in {0,1}. Optionally resize to (W, H)."""
-    img = Image.open(path).convert("L")
-    if size is not None:
-        # PIL expects size as (W, H)
-        img = img.resize(size, resample=Image.BILINEAR)
-    arr = np.asarray(img)
-    # Threshold and auto-fix polarity if mask appears inverted (lesion should be minority)
-    binary = (arr >= 128).astype(np.uint8)
-    if binary.mean() > 0.5:
-        binary = 1 - binary
-    return binary
-
-
-def make_color_overlay(base: np.ndarray, mask: np.ndarray, color_rgb: Tuple[float, float, float], alpha: float, draw_contour: bool = True) -> None:
-    """Plot base image and overlay a single-color mask with optional contour.
-    - base: HxWx3 uint8 RGB image
-    - mask: HxW {0,1}
-    - color_rgb: tuple in [0,1]
-    - alpha: float in [0,1]
-    - draw_contour: whether to draw a crisp boundary contour
-    """
-    plt.imshow(base)
-    color_layer = np.ones((*mask.shape, 3), dtype=np.float32)
-    color_layer[..., 0] *= color_rgb[0]
-    color_layer[..., 1] *= color_rgb[1]
-    color_layer[..., 2] *= color_rgb[2]
-    plt.imshow(color_layer, alpha=(mask.astype(np.float32) * alpha))
-    if draw_contour and mask.any():
-        plt.contour(mask.astype(np.float32), levels=[0.5], colors=[color_rgb], linewidths=2.0)
-    plt.axis("off")
-
-
-def make_error_overlay(base: np.ndarray, gt: np.ndarray, pred: np.ndarray, alpha: float) -> None:
-    """Plot base with TP/FP/FN color overlay.
-    - TP (pred=1, gt=1): green
-    - FP (pred=1, gt=0): red
-    - FN (pred=0, gt=1): blue
-    """
-    plt.imshow(base)
-
-    tp = (pred == 1) & (gt == 1)
-    fp = (pred == 1) & (gt == 0)
-    fn = (pred == 0) & (gt == 1)
-
-    # Combine into a color layer. Priority doesn't matter because masks are disjoint.
-    h, w = gt.shape
-    color_layer = np.zeros((h, w, 3), dtype=np.float32)
-    # Softer, less-saturated colors for a cleaner look
-    color_layer[tp] = np.array(mcolors.to_rgb("#4CAF50"), dtype=np.float32)   # soft green
-    color_layer[fp] = np.array(mcolors.to_rgb("#F44336"), dtype=np.float32)   # soft red
-    color_layer[fn] = np.array(mcolors.to_rgb("#3F51B5"), dtype=np.float32)   # indigo
-
-    alpha_map = np.zeros((h, w), dtype=np.float32)
-    alpha_map[tp | fp | fn] = alpha
-
-    plt.imshow(color_layer, alpha=alpha_map)
-    plt.axis("off")
-
-
-def visualize_case(
-    image_path: str,
-    mask_path: str,
-    pred_path: str,
-    output_path: str,
-    alpha: float = 0.4,
-    mode: str = "overlay",
-    suptitle: Optional[str] = None,
-) -> None:
-    base = load_image_rgb(image_path)  # HxWx3
-
-    # Use mask's spatial size as reference if available, else base image size
-    # PIL sizes are (W, H)
-    mask_img = Image.open(mask_path).convert("L")
-    mask_arr = (np.asarray(mask_img) >= 128).astype(np.uint8)
-    if mask_arr.mean() > 0.5:
-        mask_arr = 1 - mask_arr
-
-    # Resize prediction to mask size
-    pred_bin = load_mask_binary(pred_path, size=mask_img.size)
-
-    # If the base image differs from the mask, resize base for aligned overlays
-    h_base, w_base = base.shape[:2]
-    h_mask, w_mask = mask_arr.shape
-    if (w_base, h_base) != (w_mask, h_mask):
-        base_resized = Image.fromarray(base).resize((w_mask, h_mask), resample=Image.BILINEAR)
-        base = np.asarray(base_resized)
-
-    # Build the figure with a variable number of panels
-    panel_count = 5 if mode == "overlay+error" else 4
-    fig = plt.figure(figsize=(4 * panel_count, 4), dpi=150)
-    if suptitle:
-        fig.suptitle(suptitle)
-    plt.subplots_adjust(wspace=0.05, hspace=0.05)
-
-    def add_axis(position: int, title: str):
-        ax = plt.subplot(1, panel_count, position)
-        ax.set_title(title)
-        ax.axis("off")
-        plt.sca(ax)
-        return ax
-
-    # 1) Image
-    ax1 = add_axis(1, "Image")
-    ax1.imshow(base)
-
-    # Colors (pleasant, less saturated)
-    gt_color = mcolors.to_rgb("#2AA198")     # teal
-    pred_color = mcolors.to_rgb("#FF8C00")   # dark orange
-
-    # Helper to show masks as binary images
-    def show_mask(mask: np.ndarray, title: str) -> None:
-        plt.imshow(mask, cmap="gray", vmin=0, vmax=1)
-        plt.title(title)
-        plt.axis("off")
-
-    # 2) Ground truth mask
-    add_axis(2, "Ground truth")
-    show_mask(mask_arr, "Ground truth")
-
-    # 3) Sample mask (prediction)
-    add_axis(3, "Sample")
-    show_mask(pred_bin, "Sample")
-
-    next_pos = 4
-
-    def draw_overlay_axis(position: int):
-        ax = add_axis(position, "Overlay")
-        # Background image + contours only (no fills)
-        plt.imshow(base)
-        if mask_arr.any():
-            plt.contour(
-                mask_arr.astype(np.float32),
-                levels=[0.5],
-                colors=[gt_color],
-                linewidths=2.5,
-            )
-        if pred_bin.any():
-            plt.contour(
-                pred_bin.astype(np.float32),
-                levels=[0.5],
-                colors=[pred_color],
-                linestyles=["--"],
-                linewidths=2.5,
-            )
+        # Plot ground truth contour
+        self.draw_mask_contour(
+            gt_mask,
+            color=gt_color,
+            linewidth=linewidth,
+            alpha=alpha,
+        )
+        
+        # Plot prediction contour
+        self.draw_mask_contour(
+            pred_mask,
+            color=pred_color,
+            linewidth=linewidth,
+            alpha=alpha,
+        )
 
         # Legend
         legend_handles = [
             mpatches.Patch(color=gt_color, label="GT"),
-            mpatches.Patch(color=pred_color, label="Sample"),
+            mpatches.Patch(color=pred_color, label="Pred"),
         ]
-        ax.legend(handles=legend_handles, loc="lower right", frameon=True, fontsize=8)
+        plt.legend(handles=legend_handles, loc="lower right", frameon=True, fontsize=8)
+        plt.axis("off")
 
-    def draw_error_axis(position: int):
-        add_axis(position, "Error map")
-        make_error_overlay(base, mask_arr, pred_bin, alpha)
+    def draw_error_overlay(
+            self,
+            gt_mask: np.ndarray,
+            pred_mask: np.ndarray,
+            base_img: np.ndarray = None,
+            alpha: float=0.4,
+            add_legend: bool = True
+        ) -> None:
+        """Plot base with TP/FP/FN color overlay.
+        - TP (pred=1, gt=1): green
+        - FP (pred=1, gt=0): red
+        - FN (pred=0, gt=1): blue
+        """
+        if base_img is not None:
+            plt.imshow(base_img)
 
-    if mode in {"overlay", "overlay+error"}:
-        draw_overlay_axis(next_pos)
-        next_pos += 1
+        tp_filter = (pred_mask == 1) & (gt_mask == 1) # Preicted correctly
+        fp_filter = (pred_mask == 1) & (gt_mask == 0) # Predicted but not in GT
+        fn_filter = (pred_mask == 0) & (gt_mask == 1) # In GT but not predicted
 
-    if mode in {"error", "overlay+error"}:
-        draw_error_axis(next_pos)
+        # Combine into a color layer. Priority doesn't matter because masks are disjoint.
+        h, w = gt_mask.shape
+        color_layer = np.zeros((h, w, 3), dtype=np.float32)
+        
+        # Set colors for each error type
+        color_layer[tp_filter] = np.array(mcolors.to_rgb("#4CAF50"), dtype=np.float32)   # soft green
+        color_layer[fp_filter] = np.array(mcolors.to_rgb("#F44336"), dtype=np.float32)   # soft red
+        color_layer[fn_filter] = np.array(mcolors.to_rgb("#3F51B5"), dtype=np.float32)   # indigo
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    fig.savefig(output_path, bbox_inches="tight")
-    plt.close(fig)
+        # Set alpha map only where there is an error
+        in_any_mask_filter = tp_filter | fp_filter | fn_filter
+        alpha_map = np.zeros((h, w), dtype=np.float32)
+        alpha_map[in_any_mask_filter] = alpha
+
+        # Add legend
+        if add_legend:
+            ax = plt.gca()
+            legend_handles = [
+                mpatches.Patch(color=mcolors.to_rgb("#4CAF50"), label="TP"),
+                mpatches.Patch(color=mcolors.to_rgb("#F44336"), label="FP"),
+                mpatches.Patch(color=mcolors.to_rgb("#3F51B5"), label="FN"),
+            ]
+            ax.legend(handles=legend_handles, loc="lower right", frameon=True, fontsize=8)
+
+        plt.imshow(color_layer, alpha=alpha_map)
+        plt.axis("off")
+
+    def visualize_case(
+        self,
+        video_frame_id: str,
+        output_path: str = '',
+        show_masks: bool = False,
+        show_error:  bool = False,
+        alpha: float = 0.4,
+        linewidth: float = 1,
+    ) -> None:
+        
+        # Get paths
+        image_path, mask_path, pred_path = self.get_paths_from_video_frame_id(video_frame_id)
+
+        # Load data
+        base_img = _load_image_rgb(image_path, size=self.size)  # HxWx3
+        gt_mask = _load_mask_binary(mask_path, size=self.size) # HxW
+        pred_mask = _load_mask_binary(pred_path) # HxW
+
+        # # Build the figure with a variable number of panels
+        # panel_count = 5 if mode == "overlay+error" else 4
+        # fig = plt.figure(figsize=(4 * panel_count, 4), dpi=150)
+        fig = plt.figure(figsize=(16, 4), dpi=150)
+
+        # Plot base image
+        plt.imshow(base_img)
+
+        if show_masks:
+            self.draw_gt_and_pred_mask_overlay(gt_mask, pred_mask, linewidth=linewidth, alpha=alpha)
+            
+        if show_error:
+            self.draw_error_overlay(gt_mask, pred_mask, alpha=alpha)
+
+        if output_path :
+            print("Saving to ", output_path)
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            fig.savefig(output_path, bbox_inches="tight")
+        
+        # Set title
+        plt.title(f"{video_frame_id}")
+        plt.axis("off")
+        plt.show()
+        plt.close(fig)
+
+    def visualize_masks(
+        self,
+        video_frame_id: str,
+        show_gt: bool = True,
+        show_pred: bool = True,
+        binarize_pred: bool = True,
+        contour_overlay: bool = False,
+        show_image: bool = True,
+        plot: bool = True,
+    ) -> list:
+        '''Visualize ground truth/prediction masks and return axes list
+        
+        Args:
+            video_frame_id (str): Video frame identifier
+            show_gt (bool): Whether to show ground truth mask
+            show_pred (bool): Whether to show prediction mask
+            binarize_pred (bool): Whether to binarize prediction mask
+            contour_overlay (bool): Whether to overlay contours on image
+            show_image (bool): Whether to show the base image
+            plot (bool): Whether to display the plot immediately
+
+        Returns:
+            list: List of matplotlib axes with the plotted masks
+        '''
+        
+        _, gt_mask_path, pred_mask_path = self.get_paths_from_video_frame_id(video_frame_id)
+        
+        axes = []
+        
+        if show_gt:
+            gt_mask = _load_mask_binary(gt_mask_path, size=self.size)
+            ax_gt = plt.subplot(1, 2, 1)
+            ax_gt.set_title("Ground truth")
+            ax_gt.axis("off")
+            if show_image:
+                ax_gt.imshow(gt_mask, cmap='gray')
+            if contour_overlay:
+                self.draw_mask_contour(gt_mask, color=mcolors.to_rgb("#2AA198"), alpha=1.0)
+            axes.append(ax_gt)
+        
+        if show_pred:
+            pred_mask = _load_mask_binary(pred_mask_path, size=self.size, binarize=binarize_pred)
+            ax_pred = plt.subplot(1, 2, 2)
+            ax_pred.set_title("Prediction")
+            ax_pred.axis("off")
+            if show_image:
+                ax_pred.imshow(pred_mask, cmap='gray')
+            if contour_overlay:
+                self.draw_mask_contour(pred_mask, color=mcolors.to_rgb("#FF8C00"), alpha=1.0)
+            axes.append(ax_pred)
+        
+        if plot:
+            plt.tight_layout()
+            plt.show()
+        else:
+            # Close the figure to avoid plotting
+            plt.close()  
+        
+        return axes
+
+    def visualize_comparison(
+        self,
+        video_frame_id: str,
+        output_path: str = '',
+        alpha: float = 0.7,
+        linewidth: float = 1,
+        show: bool = True,
+    ) -> None:
+        '''Visualize comparison of GT and prediction masks side by side'''
+        
+        # Get paths
+        image_path, mask_path, pred_path = self.get_paths_from_video_frame_id(video_frame_id)
+
+        # Load data
+        base_img = _load_image_rgb(image_path, size=self.size)  # HxWx3
+        gt_mask = _load_mask_binary(mask_path, size=self.size) # HxW
+        pred_mask = _load_mask_binary(pred_path) # HxW
+
+        # Build the figure with 4 panels
+        fig = plt.figure(figsize=(12, 4), dpi=150)
+
+        # 1) Ground truth mask
+        ax1 = plt.subplot(1, 4, 1)
+        ax1.set_title("Ground truth")
+        ax1.axis("off")
+        ax1.imshow(base_img)
+        self.draw_mask_contour(gt_mask, color=mcolors.to_rgb("#2AA198"), linewidth=linewidth, alpha=1.0)
+
+        # 2) Prediction mask
+        ax2 = plt.subplot(1, 4, 2)
+        ax2.set_title("Prediction")
+        ax2.axis("off")
+        ax2.imshow(base_img)
+        self.draw_mask_contour(pred_mask, color=mcolors.to_rgb("#FF8C00"), linewidth=linewidth, alpha=1.0)
+
+        # 3) Overlay
+        ax3 = plt.subplot(1, 4, 3)
+        ax3.set_title("Overlay")
+        ax3.axis("off")
+        ax3.imshow(base_img)
+        self.draw_gt_and_pred_mask_overlay(gt_mask, pred_mask, linewidth=linewidth, alpha=alpha)
+
+        # 4) Error map
+        ax4 = plt.subplot(1, 4, 4)
+        ax4.set_title("Error map")
+        ax4.axis("off")
+        self.draw_error_overlay(gt_mask, pred_mask, base_img=base_img, alpha=alpha)
+
+        plt.tight_layout()
+
+        if output_path:
+            print("Saving to ", output_path)
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            fig.savefig(output_path, bbox_inches="tight")
+        
+        plt.suptitle(f"{video_frame_id}")
+        if show:
+            plt.show()
+        else:
+            plt.close(fig)
+
+    def visualize_multiple_comparisons(
+        self,
+        video_frame_ids: list,
+        output_dir: str = '',
+        alpha: float = 0.7,
+        linewidth: float = 1,
+    ) -> None:
+        '''Visualize comparison of GT and prediction masks for multiple video_frame_ids'''
+        
+        for video_frame_id in video_frame_ids:
+            output_path = os.path.join(output_dir, f"{video_frame_id}_comparison.png") if output_dir else ''
+            self.visualize_comparison(
+                video_frame_id=video_frame_id,
+                output_path=output_path,
+                alpha=alpha,
+                linewidth=linewidth,
+                show=False
+            )
 
 def config_parser():
     parser = argparse.ArgumentParser(description="Overlay VFSS test images with GT, predictions, and error maps.")
@@ -269,13 +400,6 @@ def config_parser():
         help="Directory to save overlay figures",
     )
     parser.add_argument("--alpha", type=float, default=0.35, help="Overlay transparency in [0,1]")
-    parser.add_argument(
-        "--mode",
-        type=str,
-        default="overlay",
-        choices=["overlay", "error", "overlay+error"],
-        help="Display mode for the last panels: overlay, error, or both (overlay+error)",
-    )
     parser.add_argument("--limit", type=int, default=0, help="If >0, only process this many images")
     return parser
 
@@ -286,7 +410,7 @@ def main() -> None:
 
     images_dir = Path(args.images_dir)
     masks_dir = Path(args.masks_dir)
-    preds_dir = resolve_preds_dir(args.solver, args.preds_dir)
+    preds_dir = _resolve_preds_dir(args.solver, args.preds_dir)
     solver_tag = args.solver
 
     video_frame_ids = [
@@ -294,28 +418,29 @@ def main() -> None:
         for file in os.listdir(images_dir)
     ]
 
+    visualizer = VFSSImageVisualizer(
+        img_dir=images_dir,
+        gt_mask_dir=masks_dir,
+        pred_mask_dir=preds_dir,
+        size=(256, 256)
+    )
+
     processed = 0
     skipped = 0
     for video_frame_id in video_frame_ids:
         if args.limit and processed >= args.limit:
             break
 
-        image_path, mask_path, pred_path = get_img_gt_and_pred_paths_from_video_frame_id(
-            video_frame_id=video_frame_id,
-            img_dir=images_dir,
-            gt_mask_dir=masks_dir,
-            pred_mask_dir=preds_dir
-        )
-
-        if not os.path.exists(mask_path) or not os.path.exists(pred_path):
-            print(f"{video_frame_id} skipped. Mask or pred does not exist.")
-            skipped += 1
-            continue
-
-        out_path = os.path.join(args.output_dir, args.solver, f"{video_frame_id}_{args.mode}_{solver_tag}.png")
-
         try:
-            visualize_case(image_path, mask_path, pred_path, out_path, alpha=args.alpha, mode=args.mode, suptitle=f"{video_frame_id} [{solver_tag}]")
+            out_path = os.path.join(args.output_dir, args.solver, f"{video_frame_id}_{solver_tag}.png")
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+            visualizer.visualize_comparison(
+                video_frame_id=video_frame_id,
+                output_path=out_path,
+                alpha=args.alpha
+            )
+
             processed += 1
             print(f"Saved: {out_path}")
         except Exception as e:
